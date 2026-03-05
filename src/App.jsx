@@ -1278,9 +1278,17 @@ const DBar = ({low,mid,high,color}) => {
 };
 
 // ── AI ────────────────────────────────────────────────────────────────────────
+// In production (Vercel), calls go through /api/chat serverless proxy (key stays server-side).
+// In local dev, calls go direct to Anthropic using VITE_ANTHROPIC_API_KEY from .env.
+const isDev = import.meta.env.DEV;
+const apiUrl = isDev ? "https://api.anthropic.com/v1/messages" : "/api/chat";
+const apiHeaders = isDev
+  ? {"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"}
+  : {"Content-Type":"application/json"};
+
 const callAI = async (prompt) => {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+  const res = await fetch(apiUrl, {
+    method:"POST", headers:apiHeaders,
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,
       system:"You are a strategic analyst. Respond ONLY with valid JSON parseable by JSON.parse(). No markdown fences, no preamble.",
       messages:[{role:"user",content:prompt}]})
@@ -1294,8 +1302,8 @@ const callAI = async (prompt) => {
 };
 
 const callText = async (prompt) => {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+  const res = await fetch(apiUrl, {
+    method:"POST", headers:apiHeaders,
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
       system:"You are a VentureBuilder strategic analyst specialising in energy sector venture building. Be concise and strategic.",
       messages:[{role:"user",content:prompt}]})
