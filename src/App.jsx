@@ -2364,10 +2364,10 @@ function Workspace({partner, allProbs, allBuys, partnerCos, partnerSH, shIntel, 
     for (const co of partnerCos) {
       if(rStatus[co.id]!=="done") await onResearch(co, probs);
     }
-    await onAnalyse(partner.id, probs, partnerSH, shIntel);
     for (const sh of partnerSH) {
       if(!shIntel[sh.id]) await onFetchSH(sh, probs);
     }
+    await onAnalyse(partner.id, probs, partnerSH, null);
   };
 
   const TABS = [
@@ -5707,8 +5707,12 @@ export default function App() {
   const [analysis, setAna]   = useState({});
   const [aStatus, setAS]     = useState({});
   const [shIntel, setSHI]    = useState({});
+  const shIntelRef           = useRef(shIntel);
   const [shLoading, setSHL]  = useState({});
   const [dbLoaded, setDbLoaded] = useState(false);
+
+  // Keep shIntelRef in sync so async functions always read latest intel
+  useEffect(() => { shIntelRef.current = shIntel; }, [shIntel]);
 
   // ── Load persisted research from storage on mount ──────────────────────────
   useEffect(() => {
@@ -5814,8 +5818,9 @@ export default function App() {
   };
 
   const doAnalysis = async (pid, ps, shs, shIntelData) => {
+    const latestIntel = shIntelData || shIntelRef.current;
     const doneRes = getCos(pid).filter(c=>rStatus[c.id]==="done").map(c=>({name:c.name,type:c.type,data:research[c.id]}));
-    const shData  = (shs||[]).filter(s=>shIntelData[s.id]).map(s=>({name:s.name,org:s.org,intel:shIntelData[s.id]}));
+    const shData  = (shs||[]).filter(s=>latestIntel[s.id]).map(s=>({name:s.name,org:s.org,intel:latestIntel[s.id]}));
     setAS(s=>({...s,[pid]:"loading"}));
     try {
       const a = await callAI(pAnalysis(ps, doneRes, shData));
