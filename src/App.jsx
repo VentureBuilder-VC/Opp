@@ -1296,7 +1296,7 @@ const getApiHeaders = () => {
 const callAI = async (prompt) => {
   const res = await fetch(apiUrl, {
     method:"POST", headers:getApiHeaders(),
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:3000,
       system:"You are a strategic analyst. Respond ONLY with valid JSON parseable by JSON.parse(). No markdown fences, no preamble.",
       messages:[{role:"user",content:prompt}]})
   });
@@ -1311,7 +1311,7 @@ const callAI = async (prompt) => {
 const callText = async (prompt) => {
   const res = await fetch(apiUrl, {
     method:"POST", headers:getApiHeaders(),
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:2000,
       system:"You are a VentureBuilder strategic analyst specialising in energy sector venture building. Be concise and strategic.",
       messages:[{role:"user",content:prompt}]})
   });
@@ -2658,7 +2658,7 @@ function Workspace({partner, allProbs, allBuys, partnerCos, partnerSH, shIntel, 
             </div>
             <div className="card" style={{padding:13,borderLeft:`3px solid ${VB.gold}`}}>
               <SL c={VB.gold} mb={6}>AI Model</SL>
-              <div style={{fontSize:10,color:VB.muted,lineHeight:1.7}}>All AI research uses <span style={{fontFamily:"'DM Mono',monospace",color:VB.gold}}>claude-sonnet-4-20250514</span></div>
+              <div style={{fontSize:10,color:VB.muted,lineHeight:1.7}}>All AI research uses <span style={{fontFamily:"'DM Mono',monospace",color:VB.gold}}>claude-sonnet-4-6</span></div>
               <div style={{fontSize:9,color:VB.muted,marginTop:4}}>Knowledge cutoff: early 2026. Verify before decisions.</div>
             </div>
           </div>
