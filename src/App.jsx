@@ -1321,18 +1321,20 @@ const callText = async (prompt) => {
 
 // ── PROMPTS ───────────────────────────────────────────────────────────────────
 const pResearch = (co, probs) => {
-  const pIds = (probs||[]).map(p=>p.id);
+  const sorted = [...(probs||[])].sort((a,b)=>(a.pri==="High"?0:a.pri==="Medium"?1:2)-(b.pri==="High"?0:b.pri==="Medium"?1:2));
+  const pIds = sorted.slice(0,10).map(p=>p.id);
   const relObj = Object.fromEntries(pIds.map(id=>[id,"High|Medium|Low|None"]));
-  return `Research ${co.name} (${co.ticker||""}, ${co.type}) as of early 2026 through the lens of these partner problem statements: ${(probs||[]).slice(0,4).map(p=>p.title).join("; ")||"AI, digital, supply chain, ESP"}.
+  return `Research ${co.name} (${co.ticker||""}, ${co.type}) as of early 2026 through the lens of these partner problem statements: ${sorted.slice(0,4).map(p=>p.title).join("; ")||"AI, digital, supply chain, ESP"}.
 Return ONLY valid JSON:
 {"companyOverview":"2-3 sentences","corePosition":"string","keyProblems":[{"title":"","description":"","severity":"High|Medium|Low"}],"digitalStrategy":"string","supplyChainRisks":"string","internationalExpansion":"string","competitiveWeaknesses":[""],"relevantToPartner":["how this relates to the partner problems"],"problemRelevance":${JSON.stringify(relObj)},"urgencySignals":["signal with source/date"],"radarScores":{"Digital":5,"Reliability":5,"SupplyChain":5,"International":5,"Commercial":5},"dataSources":["source — type — date"]}
 Fill problemRelevance only for the partner's actual problem IDs: ${pIds.join(",")}`;
 };
 
 const pSH = (sh, probs) => {
-  const pIds = (probs||[]).map(p=>p.id);
+  const sorted = [...(probs||[])].sort((a,b)=>(a.pri==="High"?0:a.pri==="Medium"?1:2)-(b.pri==="High"?0:b.pri==="Medium"?1:2));
+  const pIds = sorted.slice(0,10).map(p=>p.id);
   const relObj = Object.fromEntries(pIds.map(id=>[id,"High|Medium|Low|None"]));
-  return `Based on public information through early 2026, synthesise what ${sh.name} (${sh.title}, ${sh.org}) has publicly said about AI, digital transformation, energy technology, and OFS strategy, in context of these problems: ${(probs||[]).slice(0,3).map(p=>p.title).join("; ")}.
+  return `Based on public information through early 2026, synthesise what ${sh.name} (${sh.title}, ${sh.org}) has publicly said about AI, digital transformation, energy technology, and OFS strategy, in context of these problems: ${sorted.slice(0,3).map(p=>p.title).join("; ")}.
 Return ONLY valid JSON:
 {"summary":"2-3 sentences","overallSentiment":"bullish|cautious|mixed|critical","relevanceScore":7,"strategicPriorities":["","",""],"signals":[{"signal":"","implication":"","urgency":"High|Medium|Low"}],"keyQuotes":[{"quote":"","source":"","date":""}],"watchFor":["upcoming event or decision to monitor"],"problemRelevance":${JSON.stringify(relObj)},"dataSources":["source — type — date"]}
 Fill problemRelevance only for these problem IDs: ${pIds.join(",")}`;
@@ -3432,6 +3434,26 @@ function GlobalIntel({globalCos, globalSH, research, rStatus, shIntel, shLoading
                                 <span style={{color:VB.gold2,marginRight:4}}>!</span>{w}
                               </div>
                             ))}
+                          </div>
+                        )}
+                        {intel.problemRelevance&&Object.entries(intel.problemRelevance).filter(([,v])=>v!=="None").length>0&&(
+                          <div className="card" style={{padding:12}}>
+                            <SL c={VB.teal2} mb={7}>Relevance to Partner Problems</SL>
+                            {Object.entries(intel.problemRelevance).filter(([,v])=>v!=="None").map(([k,v])=>{
+                              const prob = allProbs.find(p=>p.id===k);
+                              if(!prob) return null;
+                              return (
+                                <div key={k} style={{display:"flex",gap:7,alignItems:"flex-start",padding:"4px 0",borderBottom:`1px solid ${VB.border}`}}>
+                                  <Bdg v={v} sm/><span style={{fontSize:9,color:VB.muted,lineHeight:1.4}}>{prob.title}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {(intel.dataSources||[]).length>0&&(
+                          <div className="card" style={{padding:12}}>
+                            <div style={{fontSize:7,fontFamily:"'DM Mono',monospace",color:VB.muted,marginBottom:4}}>DATA SOURCES</div>
+                            {intel.dataSources.map((s,i)=><div key={i} style={{fontSize:8,fontFamily:"'DM Mono',monospace",color:VB.muted,padding:"1px 0"}}>• {s}</div>)}
                           </div>
                         )}
                         {(intel.enrichFiles||[]).length>0&&(
