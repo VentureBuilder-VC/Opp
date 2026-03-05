@@ -1320,17 +1320,23 @@ const callText = async (prompt) => {
 };
 
 // ── PROMPTS ───────────────────────────────────────────────────────────────────
-const pResearch = (co, probs) =>
-`Research ${co.name} (${co.ticker||""}, ${co.type}) as of early 2026 through the lens of these partner problem statements: ${(probs||[]).slice(0,4).map(p=>p.title).join("; ")||"AI, digital, supply chain, ESP"}.
+const pResearch = (co, probs) => {
+  const pIds = (probs||[]).map(p=>p.id);
+  const relObj = Object.fromEntries(pIds.map(id=>[id,"High|Medium|Low|None"]));
+  return `Research ${co.name} (${co.ticker||""}, ${co.type}) as of early 2026 through the lens of these partner problem statements: ${(probs||[]).slice(0,4).map(p=>p.title).join("; ")||"AI, digital, supply chain, ESP"}.
 Return ONLY valid JSON:
-{"companyOverview":"2-3 sentences","corePosition":"string","keyProblems":[{"title":"","description":"","severity":"High|Medium|Low"}],"digitalStrategy":"string","supplyChainRisks":"string","internationalExpansion":"string","competitiveWeaknesses":[""],"relevantToPartner":["how this relates to the partner problems"],"problemRelevance":{"n1":"High|Medium|Low|None","n2":"High|Medium|Low|None","n3":"High|Medium|Low|None","n4":"High|Medium|Low|None","n5":"High|Medium|Low|None","e1":"High|Medium|Low|None","e2":"High|Medium|Low|None","e3":"High|Medium|Low|None","e4":"High|Medium|Low|None","e5":"High|Medium|Low|None"},"urgencySignals":["signal with source/date"],"radarScores":{"Digital":5,"Reliability":5,"SupplyChain":5,"International":5,"Commercial":5},"dataSources":["source — type — date"]}
-Fill problemRelevance only for the partner's actual problem IDs: ${(probs||[]).map(p=>p.id).join(",")}`;
+{"companyOverview":"2-3 sentences","corePosition":"string","keyProblems":[{"title":"","description":"","severity":"High|Medium|Low"}],"digitalStrategy":"string","supplyChainRisks":"string","internationalExpansion":"string","competitiveWeaknesses":[""],"relevantToPartner":["how this relates to the partner problems"],"problemRelevance":${JSON.stringify(relObj)},"urgencySignals":["signal with source/date"],"radarScores":{"Digital":5,"Reliability":5,"SupplyChain":5,"International":5,"Commercial":5},"dataSources":["source — type — date"]}
+Fill problemRelevance only for the partner's actual problem IDs: ${pIds.join(",")}`;
+};
 
-const pSH = (sh, probs) =>
-`Based on public information through early 2026, synthesise what ${sh.name} (${sh.title}, ${sh.org}) has publicly said about AI, digital transformation, energy technology, and OFS strategy, in context of these problems: ${(probs||[]).slice(0,3).map(p=>p.title).join("; ")}.
+const pSH = (sh, probs) => {
+  const pIds = (probs||[]).map(p=>p.id);
+  const relObj = Object.fromEntries(pIds.map(id=>[id,"High|Medium|Low|None"]));
+  return `Based on public information through early 2026, synthesise what ${sh.name} (${sh.title}, ${sh.org}) has publicly said about AI, digital transformation, energy technology, and OFS strategy, in context of these problems: ${(probs||[]).slice(0,3).map(p=>p.title).join("; ")}.
 Return ONLY valid JSON:
-{"summary":"2-3 sentences","overallSentiment":"bullish|cautious|mixed|critical","relevanceScore":7,"strategicPriorities":["","",""],"signals":[{"signal":"","implication":"","urgency":"High|Medium|Low"}],"keyQuotes":[{"quote":"","source":"","date":""}],"watchFor":["upcoming event or decision to monitor"],"problemRelevance":{"n1":"High|Medium|Low|None","n2":"High|Medium|Low|None"},"dataSources":["source — type — date"]}
-Fill problemRelevance only for these problem IDs: ${(probs||[]).map(p=>p.id).join(",")}`;
+{"summary":"2-3 sentences","overallSentiment":"bullish|cautious|mixed|critical","relevanceScore":7,"strategicPriorities":["","",""],"signals":[{"signal":"","implication":"","urgency":"High|Medium|Low"}],"keyQuotes":[{"quote":"","source":"","date":""}],"watchFor":["upcoming event or decision to monitor"],"problemRelevance":${JSON.stringify(relObj)},"dataSources":["source — type — date"]}
+Fill problemRelevance only for these problem IDs: ${pIds.join(",")}`;
+};
 
 const pAnalysis = (probs, resData, shData) =>
 `Synthesise internal partner discovery with industry research and stakeholder intelligence.
@@ -2364,10 +2370,14 @@ function Workspace({partner, allProbs, allBuys, partnerCos, partnerSH, shIntel, 
     for (const co of partnerCos) {
       if(rStatus[co.id]!=="done") await onResearch(co, probs);
     }
+    const freshIntel = {...shIntel};
     for (const sh of partnerSH) {
-      if(!shIntel[sh.id]) await onFetchSH(sh, probs);
+      if(!shIntel[sh.id]) {
+        const result = await onFetchSH(sh, probs);
+        if(result) freshIntel[sh.id] = result;
+      }
     }
-    await onAnalyse(partner.id, probs, partnerSH, null);
+    await onAnalyse(partner.id, probs, partnerSH, freshIntel);
   };
 
   const TABS = [
@@ -5836,8 +5846,14 @@ export default function App() {
       d.ts        = now();
       d.fetchedAt = new Date().toISOString();
       setSHI(i=>({...i,[sh.id]:d}));
-    } catch(e) { setSHI(i=>({...i,[sh.id]:{error:e.message,ts:now(),fetchedAt:new Date().toISOString()}})); }
-    setSHL(l=>({...l,[sh.id]:false}));
+      setSHL(l=>({...l,[sh.id]:false}));
+      return d;
+    } catch(e) {
+      const err = {error:e.message,ts:now(),fetchedAt:new Date().toISOString()};
+      setSHI(i=>({...i,[sh.id]:err}));
+      setSHL(l=>({...l,[sh.id]:false}));
+      return err;
+    }
   };
 
   const doGenThesis = async (p) => {
