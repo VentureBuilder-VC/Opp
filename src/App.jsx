@@ -1278,9 +1278,17 @@ const DBar = ({low,mid,high,color}) => {
 };
 
 // ── AI ────────────────────────────────────────────────────────────────────────
+// In production (Vercel), calls go through /api/chat serverless proxy (key stays server-side).
+// In local dev, calls go direct to Anthropic using VITE_ANTHROPIC_API_KEY from .env.
+const isDev = import.meta.env.DEV;
+const apiUrl = isDev ? "https://api.anthropic.com/v1/messages" : "/api/chat";
+const apiHeaders = isDev
+  ? {"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"}
+  : {"Content-Type":"application/json"};
+
 const callAI = async (prompt) => {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json"},
+  const res = await fetch(apiUrl, {
+    method:"POST", headers:apiHeaders,
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,
       system:"You are a strategic analyst. Respond ONLY with valid JSON parseable by JSON.parse(). No markdown fences, no preamble.",
       messages:[{role:"user",content:prompt}]})
@@ -1294,8 +1302,8 @@ const callAI = async (prompt) => {
 };
 
 const callText = async (prompt) => {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json"},
+  const res = await fetch(apiUrl, {
+    method:"POST", headers:apiHeaders,
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
       system:"You are a VentureBuilder strategic analyst specialising in energy sector venture building. Be concise and strategic.",
       messages:[{role:"user",content:prompt}]})
@@ -5659,9 +5667,9 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get("vb_research");
-        if (r?.value) {
-          const saved = JSON.parse(r.value);
+        const r = localStorage.getItem("vb_research");
+        if (r) {
+          const saved = JSON.parse(r);
           if (saved.research) setRes(saved.research);
           if (saved.rStatus)  setRS(Object.fromEntries(Object.keys(saved.rStatus).map(k => [k, "done"])));
           if (saved.shIntel)  setSHI(saved.shIntel);
@@ -5680,7 +5688,7 @@ export default function App() {
         const doneKeys = Object.keys(rStatus).filter(k => rStatus[k] === "done");
         // NOTE: do NOT gate on doneKeys.length — shIntel & analysis must save even with 0 researched companies
         const researchToSave = Object.fromEntries(doneKeys.map(k => [k, research[k]]).filter(([,v])=>v));
-        await window.storage.set("vb_research", JSON.stringify({
+        localStorage.setItem("vb_research", JSON.stringify({
           research: researchToSave,
           rStatus:  Object.fromEntries(doneKeys.map(k => [k, "done"])),
           shIntel,
@@ -5704,15 +5712,15 @@ export default function App() {
   // Persist actions + CRM
   useEffect(() => {
     if (!dbLoaded) return;
-    window.storage.set("vb_actions_crm", JSON.stringify({actions, crm})).catch(()=>{});
+    try { localStorage.setItem("vb_actions_crm", JSON.stringify({actions, crm})); } catch(e) { /* storage full */ }
   }, [actions, crm, dbLoaded]);
 
   // Load actions + CRM on mount (piggyback existing load effect)
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get("vb_actions_crm");
-        if (r?.value) { const d=JSON.parse(r.value); if(d.actions) setActions(d.actions); if(d.crm) setCrm(d.crm); }
+        const r = localStorage.getItem("vb_actions_crm");
+        if (r) { const d=JSON.parse(r); if(d.actions) setActions(d.actions); if(d.crm) setCrm(d.crm); }
       } catch {}
     })();
   }, []);
