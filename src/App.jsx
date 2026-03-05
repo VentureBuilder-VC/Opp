@@ -1282,13 +1282,20 @@ const DBar = ({low,mid,high,color}) => {
 // In local dev, calls go direct to Anthropic using VITE_ANTHROPIC_API_KEY from .env.
 const isDev = import.meta.env.DEV;
 const apiUrl = isDev ? "https://api.anthropic.com/v1/messages" : "/api/chat";
-const apiHeaders = isDev
-  ? {"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"}
-  : {"Content-Type":"application/json"};
+
+// Module-level auth token — set when user signs in via Google
+let _authToken = null;
+
+const getApiHeaders = () => {
+  if (isDev) return {"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"};
+  const h = {"Content-Type":"application/json"};
+  if (_authToken) h["Authorization"] = `Bearer ${_authToken}`;
+  return h;
+};
 
 const callAI = async (prompt) => {
   const res = await fetch(apiUrl, {
-    method:"POST", headers:apiHeaders,
+    method:"POST", headers:getApiHeaders(),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,
       system:"You are a strategic analyst. Respond ONLY with valid JSON parseable by JSON.parse(). No markdown fences, no preamble.",
       messages:[{role:"user",content:prompt}]})
@@ -1303,7 +1310,7 @@ const callAI = async (prompt) => {
 
 const callText = async (prompt) => {
   const res = await fetch(apiUrl, {
-    method:"POST", headers:apiHeaders,
+    method:"POST", headers:getApiHeaders(),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
       system:"You are a VentureBuilder strategic analyst specialising in energy sector venture building. Be concise and strategic.",
       messages:[{role:"user",content:prompt}]})
@@ -5634,7 +5641,47 @@ function NovGroup({novBUs, probs, buys, rStatus, getCos, novMid, novBuys, novPro
   );
 }
 
+// ── AUTH: Google Sign-In gate (venturebuilder.vc only) ────────────────────────
+function LoginGate({ onLogin }) {
+  const btnRef = useRef(null);
+  useEffect(() => {
+    const init = () => {
+      window.google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: (response) => {
+          const payload = JSON.parse(atob(response.credential.split(".")[1]));
+          if (payload.hd !== "venturebuilder.vc") {
+            alert("Access restricted to venturebuilder.vc accounts");
+            return;
+          }
+          onLogin({ email: payload.email, name: payload.name, picture: payload.picture, credential: response.credential });
+        },
+        hosted_domain: "venturebuilder.vc",
+      });
+      if (btnRef.current) {
+        window.google.accounts.id.renderButton(btnRef.current, { theme: "filled_black", size: "large", text: "signin_with", shape: "rectangular" });
+      }
+    };
+    if (window.google?.accounts?.id) { init(); return; }
+    const iv = setInterval(() => { if (window.google?.accounts?.id) { clearInterval(iv); init(); } }, 100);
+    return () => clearInterval(iv);
+  }, [onLogin]);
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"100vh", background:VB.bg, color:VB.ink }}>
+      <h1 style={{ fontFamily:"Bebas Neue", fontSize:"2.5rem", marginBottom:8 }}>VentureBuilder</h1>
+      <p style={{ color:VB.muted, marginBottom:24 }}>Sign in with your venturebuilder.vc account</p>
+      <div ref={btnRef} />
+    </div>
+  );
+}
+
 export default function App() {
+  // ── Auth state ──────────────────────────────────────────────────────────────
+  const [user, setUser] = useState(null);
+  // Keep module-level token in sync so callAI/callText always have it
+  if (user?.credential) _authToken = user.credential;
+
   const [partners, setPartners] = useState(SEED_PARTNERS);
   const [probs, setProbs]       = useState(SEED_PROBS);
   const [buys, setBuys]         = useState([]);
@@ -5822,6 +5869,9 @@ export default function App() {
   const removeCoFromPartner = (pid, cid) => setPartnerCos(m=>({...m,[pid]:(m[pid]||[]).filter(c=>c.id!==cid)}));
   const addSHToPartner  = (pid, sh)  => setPartnerSH(m=>({...m,[pid]:[...(m[pid]||[]),sh]}));
   const removeSHFromPartner = (pid, shid) => setPartnerSH(m=>({...m,[pid]:(m[pid]||[]).filter(s=>s.id!==shid)}));
+
+  // In production, require Google sign-in (venturebuilder.vc only)
+  if (!isDev && !user) return <LoginGate onLogin={setUser} />;
 
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:VB.bg,minHeight:"100vh",color:VB.ink}}>
