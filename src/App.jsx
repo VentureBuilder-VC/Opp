@@ -1293,7 +1293,35 @@ const getApiHeaders = () => {
   return h;
 };
 
+// Silently refresh Google ID token if expired (prompts one-tap or re-auth)
+const refreshTokenIfNeeded = () => new Promise((resolve) => {
+  if (isDev || !isTokenExpired()) return resolve();
+  console.warn("[VB] Google token expired — refreshing…");
+  if (!window.google?.accounts?.id) return resolve(); // can't refresh, let API return 403
+  window.google.accounts.id.initialize({
+    client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+    callback: (response) => {
+      _parseCredential(response.credential);
+      _authToken = response.credential;
+      console.log("[VB] Token refreshed");
+      resolve();
+    },
+    hosted_domain: "venturebuilder.vc",
+    auto_select: true,         // skip user interaction if possible
+  });
+  window.google.accounts.id.prompt((notification) => {
+    // If prompt was dismissed or not displayed, resolve anyway — the next API call will 403
+    if (notification.isNotDisplayed() || notification.isDismissedMoment()) {
+      console.warn("[VB] Token refresh prompt dismissed — user may need to re-login");
+      resolve();
+    }
+  });
+  // Safety timeout — don't block forever
+  setTimeout(resolve, 5000);
+});
+
 const callAI = async (prompt) => {
+  await refreshTokenIfNeeded();
   const res = await fetch(apiUrl, {
     method:"POST", headers:getApiHeaders(),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,
@@ -1301,14 +1329,15 @@ const callAI = async (prompt) => {
       messages:[{role:"user",content:prompt}]})
   });
   const d = await res.json();
-  if(d.error) throw new Error(d.error.message);
+  if(d.error) { console.error("[VB] API error:", d.error); throw new Error(d.error.message || JSON.stringify(d.error)); }
   const raw = d.content?.map(b=>b.text||"").join("")||"{}";
   const clean = raw.replace(/^```json\s*/,"").replace(/^```\s*/,"").replace(/\s*```$/,"").trim();
   try { return JSON.parse(clean); }
-  catch { const m=clean.match(/\{[\s\S]*\}/); if(m) return JSON.parse(m[0]); throw new Error("JSON parse failed"); }
+  catch { const m=clean.match(/\{[\s\S]*\}/); if(m) return JSON.parse(m[0]); console.error("[VB] JSON parse failed:", clean.slice(0,200)); throw new Error("JSON parse failed"); }
 };
 
 const callText = async (prompt) => {
+  await refreshTokenIfNeeded();
   const res = await fetch(apiUrl, {
     method:"POST", headers:getApiHeaders(),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,
@@ -1316,6 +1345,7 @@ const callText = async (prompt) => {
       messages:[{role:"user",content:prompt}]})
   });
   const d = await res.json();
+  if(d.error) { console.error("[VB] API error:", d.error); throw new Error(d.error.message || JSON.stringify(d.error)); }
   return d.content?.map(b=>b.text||"").join("")||"";
 };
 
@@ -5642,6 +5672,16 @@ function NovGroup({novBUs, probs, buys, rStatus, getCos, novMid, novBuys, novPro
 }
 
 // ── AUTH: Google Sign-In gate (venturebuilder.vc only) ────────────────────────
+// Token refresh helper — Google ID tokens expire after ~1 hour.
+// We store the expiry and silently re-prompt before it lapses.
+let _tokenExp = 0;
+const _parseCredential = (credential) => {
+  const payload = JSON.parse(atob(credential.split(".")[1]));
+  _tokenExp = (payload.exp || 0) * 1000; // ms
+  return payload;
+};
+const isTokenExpired = () => _tokenExp > 0 && Date.now() > _tokenExp - 60_000; // 1 min buffer
+
 function LoginGate({ onLogin }) {
   const btnRef = useRef(null);
   useEffect(() => {
@@ -5649,7 +5689,7 @@ function LoginGate({ onLogin }) {
       window.google.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
         callback: (response) => {
-          const payload = JSON.parse(atob(response.credential.split(".")[1]));
+          const payload = _parseCredential(response.credential);
           if (payload.hd !== "venturebuilder.vc") {
             alert("Access restricted to venturebuilder.vc accounts");
             return;
@@ -5680,7 +5720,10 @@ export default function App() {
   // ── Auth state ──────────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   // Keep module-level token in sync so callAI/callText always have it
-  if (user?.credential) _authToken = user.credential;
+  if (user?.credential) {
+    _authToken = user.credential;
+    if (_tokenExp === 0) _parseCredential(user.credential); // set expiry on first load
+  }
 
   const [partners, setPartners] = useState(SEED_PARTNERS);
   const [probs, setProbs]       = useState(SEED_PROBS);
@@ -5810,7 +5853,7 @@ export default function App() {
       d.fetchedAt = new Date().toISOString();
       setRes(r=>({...r,[co.id]:d}));
       setRS(r=>({...r,[co.id]:"done"}));
-    } catch { setRS(r=>({...r,[co.id]:"error"})); }
+    } catch(e) { console.error("[VB] Research failed for", co.name, e); setRS(r=>({...r,[co.id]:"error"})); }
   };
 
   const doAnalysis = async (pid, ps, shs, shIntelData) => {
