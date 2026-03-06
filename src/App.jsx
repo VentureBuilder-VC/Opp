@@ -1,9 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
   ScatterChart, Scatter, ZAxis, CartesianGrid, ReferenceLine,
+  AreaChart, Area,
 } from "recharts";
+import { isSupabaseConfigured } from "./lib/supabase.js";
+import * as db from "./lib/db.js";
+import { setIntelAuthToken, fetchMarketOverview, fetchCompanyFull } from "./lib/intel.js";
 
 const VB = {
   bg:"#091C1D", bg2:"#0d2526", surface:"#0f2d2e", surface2:"#132f30",
@@ -5708,11 +5712,304 @@ function LoginGate({ onLogin }) {
   );
 }
 
+// ── LIVE INTEL COMPONENT ────────────────────────────────────────────────────
+function LiveIntel({ allCos, research }) {
+  const [marketData, setMarketData] = useState(null);
+  const [companyIntel, setCompanyIntel] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [companyLoading, setCompanyLoading] = useState({});
+  const [activeCompany, setActiveCompany] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
+
+  const loadMarket = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchMarketOverview("energy oilfield services");
+      setMarketData(data);
+      setLastFetched(data.fetchedAt);
+    } catch (e) { console.error("Market overview failed:", e); }
+    setLoading(false);
+  };
+
+  const loadCompany = async (co) => {
+    setCompanyLoading(l => ({ ...l, [co.id]: true }));
+    try {
+      const data = await fetchCompanyFull(co.ticker, co.name);
+      setCompanyIntel(prev => ({ ...prev, [co.id]: data }));
+    } catch (e) { console.error(`Company intel failed for ${co.name}:`, e); }
+    setCompanyLoading(l => ({ ...l, [co.id]: false }));
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "";
+    try {
+      return new Date(dateStr).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    } catch { return dateStr; }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, color: VB.ink }}>📡 Live Market Intelligence</div>
+          <div style={{ fontSize: 10, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>
+            Real-time news, SEC filings, and stock data — powered by public APIs
+            {isSupabaseConfigured() && <span style={{ color: VB.teal2, marginLeft: 8 }}>● Supabase connected</span>}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {lastFetched && (
+            <span style={{ fontSize: 8, fontFamily: "'DM Mono',monospace", color: VB.muted }}>
+              Last: {formatDate(lastFetched)}
+            </span>
+          )}
+          <button className="btn bg" onClick={loadMarket} disabled={loading}>
+            {loading ? "Loading…" : "Fetch Market Overview"}
+          </button>
+        </div>
+      </div>
+
+      {/* STOCK QUOTES STRIP */}
+      {marketData?.quotes && marketData.quotes.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(marketData.quotes.length, 5)}, 1fr)`, gap: 8, marginBottom: 16 }}>
+          {marketData.quotes.map(q => (
+            <div key={q.ticker} className="card" style={{ padding: "12px 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, fontWeight: 600, color: VB.ink }}>{q.ticker}</span>
+                <span style={{ fontSize: 8, color: VB.muted }}>{q.exchange}</span>
+              </div>
+              <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, color: VB.ink, lineHeight: 1 }}>
+                ${q.price?.toFixed(2)}
+              </div>
+              <div style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: q.change >= 0 ? "#22c55e" : VB.coral, marginTop: 4 }}>
+                {q.change >= 0 ? "▲" : "▼"} {Math.abs(q.change).toFixed(2)} ({q.changePct >= 0 ? "+" : ""}{q.changePct?.toFixed(2)}%)
+              </div>
+              {q.fiftyTwoWeekHigh && (
+                <div style={{ fontSize: 7, color: VB.muted, fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+                  52w: ${q.fiftyTwoWeekLow?.toFixed(0)} – ${q.fiftyTwoWeekHigh?.toFixed(0)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TWO-COLUMN: Industry News + Funding News */}
+      {marketData && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+          {/* Industry News */}
+          <div className="card" style={{ padding: 16 }}>
+            <SL c={VB.teal}>Industry News</SL>
+            {(marketData.industryNews || []).length === 0 && (
+              <div style={{ fontSize: 10, color: VB.muted }}>No news fetched yet</div>
+            )}
+            {(marketData.industryNews || []).slice(0, 6).map((n, i) => (
+              <div key={i} style={{ padding: "8px 0", borderBottom: i < 5 ? `1px solid ${VB.border}` : "none" }}>
+                <a href={n.link} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 11, color: VB.ink, textDecoration: "none", lineHeight: 1.4, display: "block" }}>
+                  {n.title}
+                </a>
+                <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
+                  {n.source && <span style={{ fontSize: 8, color: VB.teal2, fontFamily: "'DM Mono',monospace" }}>{n.source}</span>}
+                  {n.pubDate && <span style={{ fontSize: 8, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>{formatDate(n.pubDate)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Funding & Deal News */}
+          <div className="card" style={{ padding: 16 }}>
+            <SL c={VB.purple}>Funding & Deals</SL>
+            {(marketData.fundingNews || []).length === 0 && (
+              <div style={{ fontSize: 10, color: VB.muted }}>No funding news fetched yet</div>
+            )}
+            {(marketData.fundingNews || []).slice(0, 6).map((n, i) => (
+              <div key={i} style={{ padding: "8px 0", borderBottom: i < 5 ? `1px solid ${VB.border}` : "none" }}>
+                <a href={n.link} target="_blank" rel="noopener noreferrer"
+                  style={{ fontSize: 11, color: VB.ink, textDecoration: "none", lineHeight: 1.4, display: "block" }}>
+                  {n.title}
+                </a>
+                <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
+                  {n.source && <span style={{ fontSize: 8, color: VB.purple, fontFamily: "'DM Mono',monospace" }}>{n.source}</span>}
+                  {n.pubDate && <span style={{ fontSize: 8, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>{formatDate(n.pubDate)}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* COMPANY-LEVEL INTEL */}
+      <SL mb={8}>Company Deep Dive</SL>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {allCos.filter(c => c.ticker).map(co => (
+          <button key={co.id} className={activeCompany?.id === co.id ? "btn bg" : "btn bt"}
+            style={{ fontSize: 9 }}
+            onClick={() => {
+              setActiveCompany(co);
+              if (!companyIntel[co.id]) loadCompany(co);
+            }}>
+            {co.ticker}
+            {companyLoading[co.id] && <Sp s={10} />}
+          </button>
+        ))}
+      </div>
+
+      {activeCompany && (
+        <div className="fu">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 18, color: activeCompany.color || VB.ink }}>
+              {activeCompany.name} ({activeCompany.ticker})
+            </div>
+            <button className="btn bt" style={{ fontSize: 9 }} onClick={() => loadCompany(activeCompany)}
+              disabled={companyLoading[activeCompany.id]}>
+              {companyLoading[activeCompany.id] ? "Loading…" : "↺ Refresh"}
+            </button>
+          </div>
+
+          {companyIntel[activeCompany.id] ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {/* Stock Quote */}
+              {companyIntel[activeCompany.id].quote && (
+                <div className="card" style={{ padding: 14 }}>
+                  <SL c={VB.gold}>Stock Quote</SL>
+                  {(() => {
+                    const q = companyIntel[activeCompany.id].quote;
+                    return (
+                      <div>
+                        <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 32, color: VB.ink }}>${q.price?.toFixed(2)}</div>
+                        <div style={{ fontSize: 12, fontFamily: "'DM Mono',monospace", color: q.change >= 0 ? "#22c55e" : VB.coral, marginBottom: 8 }}>
+                          {q.change >= 0 ? "▲" : "▼"} ${Math.abs(q.change).toFixed(2)} ({q.changePct >= 0 ? "+" : ""}{q.changePct?.toFixed(2)}%)
+                        </div>
+                        {q.fiftyTwoWeekHigh && (
+                          <div style={{ fontSize: 9, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>
+                            52-week range: ${q.fiftyTwoWeekLow?.toFixed(2)} – ${q.fiftyTwoWeekHigh?.toFixed(2)}
+                          </div>
+                        )}
+                        {q.marketCap && (
+                          <div style={{ fontSize: 9, color: VB.muted, fontFamily: "'DM Mono',monospace", marginTop: 4 }}>
+                            Market Cap: ${(q.marketCap / 1e9).toFixed(1)}B
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* SEC Filings */}
+              <div className="card" style={{ padding: 14 }}>
+                <SL c={VB.teal}>Recent SEC Filings</SL>
+                {(companyIntel[activeCompany.id].filings || []).length === 0 ? (
+                  <div style={{ fontSize: 10, color: VB.muted }}>No filings found</div>
+                ) : (
+                  (companyIntel[activeCompany.id].filings || []).map((f, i) => (
+                    <div key={i} style={{ padding: "6px 0", borderBottom: `1px solid ${VB.border}` }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <span style={{ fontSize: 9, fontFamily: "'DM Mono',monospace", color: VB.gold, fontWeight: 600,
+                          background: "rgba(181,211,52,.1)", padding: "1px 5px", borderRadius: 3 }}>{f.form}</span>
+                        <span style={{ fontSize: 9, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>{f.date}</span>
+                      </div>
+                      {f.url ? (
+                        <a href={f.url} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize: 10, color: VB.ink2, textDecoration: "none", marginTop: 2, display: "block" }}>
+                          {f.description || f.company}
+                        </a>
+                      ) : (
+                        <div style={{ fontSize: 10, color: VB.ink2, marginTop: 2 }}>{f.description || f.company}</div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* News */}
+              <div className="card" style={{ padding: 14, gridColumn: "1 / -1" }}>
+                <SL c={VB.teal2}>Latest News</SL>
+                {(companyIntel[activeCompany.id].news || []).length === 0 ? (
+                  <div style={{ fontSize: 10, color: VB.muted }}>No news found</div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    {(companyIntel[activeCompany.id].news || []).map((n, i) => (
+                      <div key={i} style={{ padding: "8px 10px", background: VB.surface, borderRadius: 5, border: `1px solid ${VB.border}` }}>
+                        <a href={n.link} target="_blank" rel="noopener noreferrer"
+                          style={{ fontSize: 10, color: VB.ink, textDecoration: "none", lineHeight: 1.4, display: "block" }}>
+                          {n.title}
+                        </a>
+                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                          {n.source && <span style={{ fontSize: 7, color: VB.teal2, fontFamily: "'DM Mono',monospace" }}>{n.source}</span>}
+                          {n.pubDate && <span style={{ fontSize: 7, color: VB.muted, fontFamily: "'DM Mono',monospace" }}>{formatDate(n.pubDate)}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* AI Research Summary (if exists) */}
+              {research[activeCompany.id] && (
+                <div className="card" style={{ padding: 14, gridColumn: "1 / -1" }}>
+                  <SL c={VB.gold}>AI Research Summary</SL>
+                  <div style={{ fontSize: 11, color: VB.ink2, lineHeight: 1.5, marginBottom: 8 }}>
+                    {research[activeCompany.id].companyOverview}
+                  </div>
+                  {research[activeCompany.id].keyProblems && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {research[activeCompany.id].keyProblems.slice(0, 4).map((kp, i) => (
+                        <span key={i} style={{ fontSize: 8, padding: "2px 7px", borderRadius: 3, fontFamily: "'DM Mono',monospace",
+                          background: kp.severity === "High" ? "rgba(228,105,98,.1)" : "rgba(0,184,204,.08)",
+                          color: kp.severity === "High" ? VB.coral : VB.teal2,
+                          border: `1px solid ${kp.severity === "High" ? VB.coral + "30" : VB.teal2 + "30"}` }}>
+                          {kp.title}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : companyLoading[activeCompany.id] ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 20, color: VB.muted }}>
+              <Sp s={14} /> Fetching live data for {activeCompany.name}…
+            </div>
+          ) : (
+            <div style={{ padding: 20, color: VB.muted, fontSize: 11 }}>
+              Click a company ticker above to load live intelligence
+            </div>
+          )}
+        </div>
+      )}
+
+      {!marketData && !loading && (
+        <div className="card" style={{ padding: 24, textAlign: "center", marginTop: 12 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>📡</div>
+          <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 18, color: VB.ink, marginBottom: 6 }}>Live Market Intelligence</div>
+          <div style={{ fontSize: 11, color: VB.muted, maxWidth: 400, margin: "0 auto", lineHeight: 1.5 }}>
+            Fetch real-time stock quotes, industry news, SEC filings, and funding announcements for your tracked companies.
+          </div>
+          <button className="btn bg" style={{ marginTop: 16 }} onClick={loadMarket}>
+            Load Market Overview
+          </button>
+        </div>
+      )}
+
+      {loading && !marketData && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 40, color: VB.muted }}>
+          <Sp s={16} /> Fetching market data from public sources…
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // ── Auth state ──────────────────────────────────────────────────────────────
   const [user, setUser] = useState(null);
   // Keep module-level token in sync so callAI/callText always have it
-  if (user?.credential) _authToken = user.credential;
+  if (user?.credential) {
+    _authToken = user.credential;
+    setIntelAuthToken(user.credential);
+  }
 
   const [partners, setPartners] = useState(SEED_PARTNERS);
   const [probs, setProbs]       = useState(SEED_PROBS);
@@ -5750,15 +6047,32 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const r = localStorage.getItem("vb_research");
-        if (r) {
-          const saved = JSON.parse(r);
-          if (saved.research) setRes(saved.research);
-          if (saved.rStatus)  setRS(Object.fromEntries(Object.keys(saved.rStatus).map(k => [k, "done"])));
-          if (saved.shIntel)  setSHI(saved.shIntel);
-          if (saved.analysis) setAna(saved.analysis);
+        if (isSupabaseConfigured()) {
+          // Load from Supabase
+          const [resData, shData, anaData, acData] = await Promise.all([
+            db.loadResearch(),
+            db.loadStakeholderIntel(),
+            db.loadAnalysis(),
+            db.loadActionsCRM(),
+          ]);
+          if (resData.research && Object.keys(resData.research).length) setRes(resData.research);
+          if (resData.rStatus && Object.keys(resData.rStatus).length) setRS(resData.rStatus);
+          if (shData && Object.keys(shData).length) setSHI(shData);
+          if (anaData && Object.keys(anaData).length) setAna(anaData);
+          if (acData.actions.length) setActions(acData.actions);
+          if (acData.crm.length) setCrm(acData.crm);
+        } else {
+          // Fallback to localStorage
+          const r = localStorage.getItem("vb_research");
+          if (r) {
+            const saved = JSON.parse(r);
+            if (saved.research) setRes(saved.research);
+            if (saved.rStatus)  setRS(Object.fromEntries(Object.keys(saved.rStatus).map(k => [k, "done"])));
+            if (saved.shIntel)  setSHI(saved.shIntel);
+            if (saved.analysis) setAna(saved.analysis);
+          }
         }
-      } catch(e) { /* first run — no saved data */ }
+      } catch(e) { console.warn("Data load failed:", e); }
       setDbLoaded(true);
     })();
   }, []);
@@ -5769,8 +6083,9 @@ export default function App() {
     const saveData = async () => {
       try {
         const doneKeys = Object.keys(rStatus).filter(k => rStatus[k] === "done");
-        // NOTE: do NOT gate on doneKeys.length — shIntel & analysis must save even with 0 researched companies
         const researchToSave = Object.fromEntries(doneKeys.map(k => [k, research[k]]).filter(([,v])=>v));
+
+        // Always save to localStorage (works as offline cache even with Supabase)
         localStorage.setItem("vb_research", JSON.stringify({
           research: researchToSave,
           rStatus:  Object.fromEntries(doneKeys.map(k => [k, "done"])),
@@ -5778,6 +6093,15 @@ export default function App() {
           analysis,
           savedAt:  new Date().toISOString(),
         }));
+
+        // Also sync to Supabase if configured
+        if (isSupabaseConfigured()) {
+          await Promise.allSettled([
+            ...doneKeys.filter(k => research[k]).map(k => db.saveResearch(k, research[k])),
+            ...Object.entries(shIntel).filter(([,v]) => v && !v.error).map(([k, v]) => db.saveStakeholderIntel(k, v)),
+            ...Object.entries(analysis).filter(([,v]) => v).map(([k, v]) => db.saveAnalysis(k, v)),
+          ]);
+        }
       } catch(e) { console.warn("Storage save failed:", e); }
     };
     saveData();
@@ -5999,6 +6323,7 @@ export default function App() {
             ["actions", `🗓  Actions${actions.filter(a=>a.status!=="done").length>0?" ("+actions.filter(a=>a.status!=="done").length+")":""}`],
             ["crm", `📬  Pipeline${crm.length>0?" ("+crm.length+")":""}`],
             ["reports","📋  Reports"],
+            ["intel","📡  Live Intel"],
             ["match","⚡  Match"],
             ["ai","✦  AI"],
           ].map(([id,label])=>(
@@ -6182,6 +6507,13 @@ export default function App() {
             <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:22,color:VB.ink,marginBottom:3}}>✦ VentureBuilder AI</div>
             <div style={{fontSize:10,color:VB.muted,fontFamily:"'DM Mono',monospace",marginBottom:16}}>Chat · Match Suggestions · Deal Memo Drafting — fully context-aware</div>
             <AIChat partners={partners} probs={probs} buys={buys} research={research} allCos={allCos} allSH={allSH} shIntel={shIntel}/>
+          </div>
+        )}
+
+        {/* LIVE INTEL */}
+        {mainTab==="intel"&&!activeP&&(
+          <div className="fu">
+            <LiveIntel allCos={allCos} research={research} />
           </div>
         )}
 
