@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
   ScatterChart, Scatter, ZAxis, CartesianGrid, ReferenceLine,
-  AreaChart, Area,
 } from "recharts";
 import { isSupabaseConfigured } from "./lib/supabase.js";
 import * as db from "./lib/db.js";
@@ -3109,7 +3108,7 @@ function EnrichPanel({entity, entityType, existingProfile, allProbs, onEnriched,
 // ══════════════════════════════════════════════════════════════════════════════
 // GLOBAL INTEL — top-level view of all global companies + stakeholders
 // ══════════════════════════════════════════════════════════════════════════════
-function GlobalIntel({globalCos, globalSH, research, rStatus, shIntel, shLoading, onResearch, onFetchSH, allProbs, onEnrichCo, onEnrichSH}) {
+function GlobalIntel({globalCos, globalSH, research, rStatus, rErrors, shIntel, shLoading, onResearch, onFetchSH, allProbs, onEnrichCo, onEnrichSH}) {
   const [section, setSection] = useState("companies");
   const [selCo, setSelCo]     = useState(null);
   const [selSH, setSelSH]     = useState(null);
@@ -3203,7 +3202,9 @@ function GlobalIntel({globalCos, globalSH, research, rStatus, shIntel, shLoading
                   </div>}
                   {!st&&<button className="btn bo" style={{width:"100%",justifyContent:"center",fontSize:9}} onClick={e=>{e.stopPropagation();onResearch(co,allProbs);}}>▶ Research</button>}
                   {st==="loading"&&<div style={{display:"flex",gap:6,fontSize:10,color:VB.muted,alignItems:"center"}}><Sp s={12}/>Researching…</div>}
-                  {st==="error"&&<div style={{fontSize:9,color:VB.coral}}>Failed — <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={e=>{e.stopPropagation();onResearch(co,allProbs);}}>retry</span></div>}
+                  {st==="error"&&<div style={{fontSize:9,color:VB.coral}}>
+                    Failed{rErrors?.[co.id] ? `: ${rErrors[co.id]}` : ""} — <span style={{cursor:"pointer",textDecoration:"underline"}} onClick={e=>{e.stopPropagation();onResearch(co,allProbs);}}>retry</span>
+                  </div>}
                   {st==="done"&&d&&(
                     <div>
                       <div style={{fontSize:10,color:VB.muted,lineHeight:1.6,marginBottom:6}}>{(d.companyOverview||"").slice(0,110)}…</div>
@@ -6074,6 +6075,7 @@ export default function App() {
   // Research results keyed by company id (shared — same company same data regardless of partner)
   const [research, setRes]   = useState({});
   const [rStatus, setRS]     = useState({});
+  const [rErrors, setRE]     = useState({});   // error messages keyed by company id
   const [analysis, setAna]   = useState({});
   const [aStatus, setAS]     = useState({});
   const [shIntel, setSHI]    = useState({});
@@ -6205,13 +6207,18 @@ export default function App() {
   const doResearch = async (co, ps, force=false) => {
     if (rStatus[co.id] === "done" && !force) return; // skip if cached unless forced refresh
     setRS(r=>({...r,[co.id]:"loading"}));
+    setRE(e=>({...e,[co.id]:null}));
     try {
       const d = await callAI(pResearch(co, ps));
       d.ts        = now();
       d.fetchedAt = new Date().toISOString();
       setRes(r=>({...r,[co.id]:d}));
       setRS(r=>({...r,[co.id]:"done"}));
-    } catch(e) { console.error("[VB] Research failed for", co.name, e); setRS(r=>({...r,[co.id]:"error"})); }
+    } catch(e) {
+      console.error("[VB] Research failed for", co.name, e);
+      setRS(r=>({...r,[co.id]:"error"}));
+      setRE(prev=>({...prev,[co.id]:e.message||"Unknown error"}));
+    }
   };
 
   const doAnalysis = async (pid, ps, shs, shIntelData) => {
@@ -6563,7 +6570,7 @@ export default function App() {
           <div className="fu">
             <GlobalIntel
               globalCos={GLOBAL_COS} globalSH={GLOBAL_SH}
-              research={research} rStatus={rStatus}
+              research={research} rStatus={rStatus} rErrors={rErrors}
               shIntel={shIntel} shLoading={shLoading}
               onResearch={doResearch} onFetchSH={doFetchSH}
               allProbs={probs}
